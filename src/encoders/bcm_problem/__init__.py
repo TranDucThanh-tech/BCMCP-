@@ -1,0 +1,1 @@
+from . import bcm_sequential_counter_encoder

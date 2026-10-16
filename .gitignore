@@ -1,0 +1,49 @@
+# ================= FOLDERS & DATA =================
+# Không theo dõi thư mục chứa dữ liệu
+data/
+# ================= PYTHON =================
+# Thư mục cache và biên dịch Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Phân phối và gói Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Môi trường ảo Python
+.venv/
+venv/
+ENV/
+env/
+
+# ================= IDE & EDITOR =================
+# Cấu hình Visual Studio Code và PyCharm
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ================= OS & LOGS =================
+# Tệp hệ điều hành và nhật ký hoạt động
+.DS_Store
+Thumbs.db
+*.log
+.env
