@@ -1,9 +1,9 @@
 from abc import abstractmethod
-
+from abc import ABC
 from src.variables.variable_manager import VariableManager
 from src.bcm.bcm_problem import BCMProblem
 
-class BCMEncoder:
+class BCMEncoder(ABC):
     def __init__(self, bcm_problem: BCMProblem):
         self.bcm_problem = bcm_problem
         self.vm = VariableManager()
@@ -25,3 +25,17 @@ class BCMEncoder:
     @abstractmethod
     def encode_distance_constraint(self) -> list[list[int]]:
         pass
+
+    @abstractmethod
+    def span_assumptions(self, k: int) -> list[int] | None:
+        """Literal ép span <= k. Trả None nếu k chắc chắn UNSAT."""
+        pass
+
+    @abstractmethod
+    def decode_ends(self, model: set[int]) -> dict[int, int]:
+        """Literal ép span <= k. Trả None nếu k chắc chắn UNSAT."""
+        pass
+
+    def encode_bound_constraint(self) -> list[list[int]]:
+        """Clause phụ trợ cho span bound (độc lập với K). Mặc định không có."""
+        return []

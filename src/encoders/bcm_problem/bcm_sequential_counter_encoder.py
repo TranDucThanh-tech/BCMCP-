@@ -14,15 +14,16 @@ class BCMSequentialCounterEncoder(BCMEncoder):
     # ------------------------------------------------------------------ vertices
     def encode_vertex_constraint(self) -> list[list[int]]:
         clauses: list[list[int]] = []
-        span = self.bcm_problem.get_span()
+        span = self.bcm_problem.get_span()   # horizon = UB
 
         for vertex in self.bcm_problem.get_graph().get_vertices():
             if span < vertex.weight:
-                clauses.append([])
-                self.prefix[vertex.id] = []
-                continue
+                # Horizon nhỏ hơn weight: UB không hợp lệ, không nên nhét [] vào solver
+                raise ValueError(
+                    f"horizon {span} < weight {vertex.weight} of vertex {vertex.id}"
+                )
 
-            keys = [("X", vertex.id, color) for color in range(vertex.weight, span + 1)]
+            keys = [("X", vertex.id, c) for c in range(vertex.weight, span + 1)]
             vertex_clauses, prefix = self.cardinality_encoder.encode_exactly_one_with_prefix(keys)
             clauses.extend(vertex_clauses)
             self.prefix[vertex.id] = prefix
@@ -39,10 +40,6 @@ class BCMSequentialCounterEncoder(BCMEncoder):
                 (edge.u, edge.v) if edge.u.weight > edge.v.weight else (edge.v, edge.u)
             )
 
-            # An empty domain (span < weight) already makes the formula UNSAT.
-            if span < reference.weight or span < other.weight:
-                continue
-
             d_ro = edge.weight + other.weight
             d_or = edge.weight + reference.weight
 
@@ -53,18 +50,38 @@ class BCMSequentialCounterEncoder(BCMEncoder):
                 lower = label - d_or
 
                 clause = [-x]
-
-                # not P(o, upper); P(o, span) is always true, so skip it.
-                if upper < span:
+                if upper < span:                      # P(o, span) luôn true
                     clause.append(-self.le(other, upper))
-
-                # P(o, lower); if lower < w(o) it is the constant False, so skip it.
-                if lower >= other.weight:
+                if lower >= other.weight:             # dưới weight thì là False
                     clause.append(self.le(other, lower))
 
                 clauses.append(clause)
 
         return clauses
+
+    # ------------------------------------------------------------------ incremental
+    def span_assumptions(self, k: int) -> list[int] | None:
+        """span <= k  <=>  le(v, k) với mọi v (màu cuối của v <= k)."""
+        top = self.bcm_problem.get_span()
+        if k >= top:
+            return []                                  # không cần ràng buộc gì thêm
+
+        lits: list[int] = []
+        for vertex in self.bcm_problem.get_graph().get_vertices():
+            if k < vertex.weight:
+                return None                            # đỉnh này không thể kết thúc <= k
+            lits.append(self.le(vertex, k))
+        return lits
+
+    def decode_ends(self, model: set[int]) -> dict[int, int]:
+        span = self.bcm_problem.get_span()
+        ends: dict[int, int] = {}
+        for vertex in self.bcm_problem.get_graph().get_vertices():
+            for c in range(vertex.weight, span + 1):
+                if self.get_var(("X", vertex.id, c)) in model:
+                    ends[vertex.id] = c
+                    break
+        return ends
 
     # ------------------------------------------------------------------ helpers
     def le(self, vertex, label: int) -> int:

@@ -6,33 +6,27 @@ from src.encoders.cardinality.order_encoder import OrderEncoder
 
 @BCMEncoderFactory.register("order")
 class BCMOrderEncoder(BCMEncoder):
-    """
-    X(v, c): label of v equals c, c in [w(v), span]
-    G(v, i): order variable of OrderEncoder, i in 1..size+1 (size = span - w(v) + 1)
-             G_i  <=>  label(v) >= w(v) + i - 1
-    label(v) <= a  <=>  NOT G_{a - w(v) + 2}
-    """
+    """(giữ nguyên docstring)"""
 
     def __init__(self, bcm_problem: BCMProblem):
         super().__init__(bcm_problem)
-        self.order: dict[int, list[int]] = {}   # vertex.id -> [G_1, ..., G_{size+1}]
+        self.order: dict[int, list[int]] = {}
         self.cardinality_encoder = OrderEncoder(self.vm)
 
     # ------------------------------------------------------------------ vertices
     def encode_vertex_constraint(self) -> list[list[int]]:
         clauses: list[list[int]] = []
-        span = self.bcm_problem.get_span()
+        span = self.bcm_problem.get_span()        # horizon = UB
 
         for vertex in self.bcm_problem.get_graph().get_vertices():
             if span < vertex.weight:
-                clauses.append([])
-                self.order[vertex.id] = []
-                continue
+                raise ValueError(
+                    f"horizon {span} < weight {vertex.weight} of vertex {vertex.id}"
+                )
 
-            keys = [("X", vertex.id, color) for color in range(vertex.weight, span + 1)]
+            keys = [("X", vertex.id, c) for c in range(vertex.weight, span + 1)]
             clauses.extend(self.cardinality_encoder.encode_exactly_one(keys))
 
-            # Same key format as OrderEncoder uses, so ids come from the shared vm.
             size = len(keys)
             self.order[vertex.id] = [
                 self.get_var(("G", tuple(keys), i)) for i in range(1, size + 2)
@@ -49,35 +43,47 @@ class BCMOrderEncoder(BCMEncoder):
             reference, other = (
                 (edge.u, edge.v) if edge.u.weight > edge.v.weight else (edge.v, edge.u)
             )
-
-            # An empty domain (span < weight) already makes the formula UNSAT.
-            if span < reference.weight or span < other.weight:
-                continue
-
             d_ro = edge.weight + other.weight
             d_or = edge.weight + reference.weight
 
             for label in range(reference.weight, span + 1):
                 x = self.get_var(("X", reference.id, label))
-
                 upper = min(label + d_ro - 1, span)
                 lower = label - d_or
 
                 clause = [-x]
-
-                # other is NOT entirely <= upper (i.e. other above reference).
-                # label(o) <= span is always true, so skip when upper == span.
                 if upper < span:
                     clause.append(-self.le(other, upper))
-
-                # other entirely <= lower (other below reference).
-                # If lower < w(o) it is the constant False, so skip it.
                 if lower >= other.weight:
                     clause.append(self.le(other, lower))
-
                 clauses.append(clause)
 
         return clauses
+
+    # ------------------------------------------------------------------ incremental
+    def span_assumptions(self, k: int) -> list[int] | None:
+        """span <= k  <=>  NOT G_{k-w+2} với mọi v."""
+        top = self.bcm_problem.get_span()
+        if k >= top:
+            return []
+
+        lits: list[int] = []
+        for vertex in self.bcm_problem.get_graph().get_vertices():
+            if k < vertex.weight:
+                return None
+            lits.append(self.le(vertex, k))
+        return lits
+
+
+    def decode_ends(self, model: set[int]) -> dict[int, int]:
+        span = self.bcm_problem.get_span()
+        ends: dict[int, int] = {}
+        for vertex in self.bcm_problem.get_graph().get_vertices():
+            for c in range(vertex.weight, span + 1):
+                if self.get_var(("X", vertex.id, c)) in model:
+                    ends[vertex.id] = c
+                    break
+        return ends
 
     # ------------------------------------------------------------------ helpers
     def le(self, vertex, label: int) -> int:
