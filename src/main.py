@@ -3,22 +3,17 @@ import time
 
 from src.data_reader.graph_reader import GraphReader
 
-# import để các decorator @register chạy (encoder và solver)
-from src.encoders.bcm_problem.bcm_pairwise_encoder import BCMPairwiseEncoder  # noqa: F401
-from src.encoders.bcm_problem.bcm_order_encoder import BCMOrderEncoder  # noqa: F401
-from src.encoders.bcm_problem.bcm_sequential_counter_encoder import BCMSequentialCounterEncoder  # noqa: F401
-import src.solvers.bcm_solver  # noqa: F401  (__init__.py import plain/incremental/maxsat)
-from src.solvers.bcm_solver_factory import BCMSolverFactory
-from src.solvers.plain_bcm_solver import PlainBCMSolver
-from src.solvers.incremental_bcm_solver import IncrementalBCMSolver
+import src.encoders.bcm_problem                       # noqa: F401  (đăng ký encoder)
+from src.solvers import SolverFamilyFactory  
+
 
 
 # ------------------------------------------------------------------ tiện ích
 def timed(func, *args, **kwargs):
-    """Chạy func, trả về (kết quả, thời gian CPU tính bằng giây)."""
-    start = time.process_time()
+    """Chạy func, trả về (kết quả, CPU time, wall time) tính bằng giây."""
+    cpu0, wall0 = time.process_time(), time.perf_counter()
     result = func(*args, **kwargs)
-    return result, time.process_time() - start
+    return result, time.process_time() - cpu0, time.perf_counter() - wall0
 
 
 def lower_bound(graph) -> int:
@@ -65,54 +60,59 @@ def is_valid(graph, ends) -> bool:
     return True
 
 
-# ------------------------------------------------------------------ main
-def main():
+def build_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", default="data/test.txt")
-    parser.add_argument("--encoder", default="sequential_counter")
-    parser.add_argument("--solvers", nargs="+", default=["plain", "incremental"])
-    parser.add_argument("--sat", default="cadical153", help="tên solver của PySAT")
-    parser.add_argument("--ub", type=int, default=None, help="mặc định: UB tham lam")
-    parser.add_argument("--lb", type=int, default=None, help="mặc định: LB từ cạnh/đỉnh")
-    args = parser.parse_args()
+    parser.add_argument("--solvers", nargs="+",
+                        default=["cnf:plain", "cnf:incremental"],
+                        help="dạng họ:chiến_lược, ví dụ cnf:incremental cp:cpsat")
+    parser.add_argument("--ub", type=int, default=None)
+    parser.add_argument("--lb", type=int, default=None)
+    parser.add_argument("--list", action="store_true", help="liệt kê họ và chiến lược")
+    for family in SolverFamilyFactory.all():          # mỗi họ tự thêm tham số của nó
+        family.add_arguments(parser)
+    return parser
+
+
+def main():
+    args = build_parser().parse_args()
+
+    if args.list:
+        for name in SolverFamilyFactory.names():
+            print(f"{name}: {SolverFamilyFactory.get(name).strategies()}")
+        return
 
     graph = GraphReader(args.data).read()
     lb = args.lb if args.lb is not None else lower_bound(graph)
     ub = args.ub if args.ub is not None else greedy_ub(graph)
-
-    print(f"Graph : {args.data}")
-    print(f"Encoder: {args.encoder} | SAT solver: {args.sat} | LB={lb} UB={ub}")
+    print(f"Graph: {args.data} | LB={lb} UB={ub}")
 
     rows, spans = [], {}
-    for name in args.solvers:
-        solver = BCMSolverFactory.create(
-            name, graph, args.encoder, ub, lb, sat_solver_name=args.sat
-        )
-        result, cpu = timed(solver.run)
+    for spec in args.solvers:
+        family, strategy = spec.split(":")
+        solver = SolverFamilyFactory.create(family, strategy, graph, ub, lb, args)
+        result, cpu, wall = timed(solver.run)
 
         if result.span is None:
-            status = "INFEASIBLE (UB quá nhỏ)"
+            status = "INFEASIBLE / no solution"
         elif not is_valid(graph, result.ends):
             status = "INVALID"
         else:
             status = "valid" + (" & optimal" if result.proven_optimal else "")
-            spans[name] = result.span
-        rows.append((name, result.span, cpu, status))
+            if result.proven_optimal:
+                spans[spec] = result.span
+        rows.append((spec, result.span, cpu, wall, status))
 
-    # --- Thống kê ---
-    print("\n========================================")
-    print("              TIMING REPORT             ")
-    print("========================================")
-    print(f"{'Solver':<14}{'Span':>6}{'CPU (s)':>12}   Status")
-    for name, span, cpu, status in rows:
-        print(f"{name:<14}{str(span):>6}{cpu:>12.4f}   {status}")
-    print("----------------------------------------")
-
+    print("\n" + "=" * 62)
+    print(f"{'Solver':<20}{'Span':>6}{'CPU (s)':>11}{'Wall (s)':>11}   Status")
+    for spec, span, cpu, wall, status in rows:
+        print(f"{spec:<20}{str(span):>6}{cpu:>11.4f}{wall:>11.4f}   {status}")
+    print("-" * 62)
     if len(set(spans.values())) > 1:
-        print(f"CẢNH BÁO: các solver cho span khác nhau: {spans}")
+        print(f"CẢNH BÁO: span tối ưu khác nhau: {spans}")
     elif spans:
         print(f"Các solver thống nhất: span = {next(iter(spans.values()))}")
-    print("========================================")
+    print("=" * 62)
 
 
 if __name__ == "__main__":

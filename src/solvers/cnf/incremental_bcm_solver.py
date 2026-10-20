@@ -1,11 +1,12 @@
-from src.solvers.iterative_bcm_solver import IterativeBCMSolver
-from src.solvers.bcm_solver_factory import BCMSolverFactory
-from src.encoders.bcm_problem.bcm_encoder_factory import BCMEncoderFactory
-from src.bcm.bcm_problem import BCMProblem
 from pysat.solvers import Solver
 
+from src.bcm.bcm_problem import BCMProblem
+from src.encoders.bcm_problem.bcm_encoder_factory import BCMEncoderFactory
+from src.solvers.cnf.cnf_solver_factory import CnfSolverFactory
+from src.solvers.cnf.iterative_bcm_solver import IterativeBCMSolver
 
-@BCMSolverFactory.register("incremental")
+
+@CnfSolverFactory.register("incremental")
 class IncrementalBCMSolver(IterativeBCMSolver):
     def prepare(self):
         self.encoder = BCMEncoderFactory.create(
@@ -20,4 +21,6 @@ class IncrementalBCMSolver(IterativeBCMSolver):
         return self.encoder.decode_ends({l for l in self.solver.get_model() if l > 0})
 
     def close(self):
-        self.solver.delete()
+        solver = getattr(self, "solver", None)
+        if solver is not None:
+            solver.delete()
